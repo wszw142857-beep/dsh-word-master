@@ -1,0 +1,132 @@
+{
+  "_comment": "Word Master 审阅界面的结构化选项清单。前端渲染成 chips，AI 通过 recommendations.json 标出推荐项。与 ppt-master 的 catalogs.json 同构：这里列全所有可选项，AI 只负责标 ★。",
+  "verdicts": [
+    {
+      "id": "keep",
+      "label_zh": "保持不动",
+      "desc_zh": "这段不用改，我认可当前写法",
+      "ai_hint": "不要改动这一段"
+    },
+    {
+      "id": "rewrite",
+      "label_zh": "重写",
+      "desc_zh": "按我的要求重新写这一段",
+      "ai_hint": "整段重写，保留原意但换表达"
+    },
+    {
+      "id": "shorten",
+      "label_zh": "压缩",
+      "desc_zh": "太长了，删掉冗余、保留结论",
+      "ai_hint": "把这一段压到一半以内，只留必要信息"
+    },
+    {
+      "id": "expand",
+      "label_zh": "展开",
+      "desc_zh": "太薄了，补细节或论证",
+      "ai_hint": "补充支撑细节或论证，写足但不要注水"
+    },
+    {
+      "id": "split",
+      "label_zh": "拆分",
+      "desc_zh": "一个段落塞了多个论题，拆开",
+      "ai_hint": "按论题拆成多段，每段一个完整论题"
+    },
+    {
+      "id": "merge",
+      "label_zh": "并入上段",
+      "desc_zh": "这段和上一段是同一件事",
+      "ai_hint": "把这一段并入上一段，去掉重复衔接"
+    },
+    {
+      "id": "reorder",
+      "label_zh": "调整位置",
+      "desc_zh": "内容对但顺序不对",
+      "ai_hint": "内容保留，调整到合适的位置"
+    },
+    {
+      "id": "delete",
+      "label_zh": "整段删除",
+      "desc_zh": "这段不需要",
+      "ai_hint": "删除这一段，并检查前后衔接是否通顺"
+    },
+    {
+      "id": "fix_language",
+      "label_zh": "改语言",
+      "desc_zh": "术语/表述/标点有问题",
+      "ai_hint": "按写作规范修改表述，术语白话化，标点半角"
+    },
+    {
+      "id": "fix_logic",
+      "label_zh": "改逻辑",
+      "desc_zh": "缺依据、结论跳步、前后不一致",
+      "ai_hint": "补齐推理链或修正前后不一致的地方"
+    },
+    {
+      "id": "add_evidence",
+      "label_zh": "补证据",
+      "desc_zh": "这里需要一个数字/引用/依据",
+      "ai_hint": "补充可核实的数据、文献或推导依据"
+    },
+    {
+      "id": "move_to_method",
+      "label_zh": "移到方法章",
+      "desc_zh": "这段属于方法，不该放在这里",
+      "ai_hint": "把这段移到方法章节"
+    }
+  ],
+  "global_intents": [
+    {
+      "id": "tighten",
+      "label_zh": "整体再压",
+      "desc_zh": "全篇篇幅偏长",
+      "ai_hint": "全篇压缩约 20%，优先删重复与铺陈"
+    },
+    {
+      "id": "deepen",
+      "label_zh": "整体加强论证",
+      "desc_zh": "论证偏薄，需要更扎实",
+      "ai_hint": "加强论证密度，每节补足支撑与判断"
+    },
+    {
+      "id": "plain_language",
+      "label_zh": "术语白话化",
+      "desc_zh": "术语太密，读者看不懂",
+      "ai_hint": "术语首次出现给白话解释，其余直接用"
+    },
+    {
+      "id": "unify_tone",
+      "label_zh": "统一语气",
+      "desc_zh": "各节语气不一致",
+      "ai_hint": "统一全篇语气与句式节奏"
+    },
+    {
+      "id": "strengthen_opener",
+      "label_zh": "加强章节衔接",
+      "desc_zh": "节与节之间跳跃",
+      "ai_hint": "让各节首句层层递进，构成主线"
+    },
+    {
+      "id": "add_quantification",
+      "label_zh": "补充量化",
+      "desc_zh": "结论多为定性描述",
+      "ai_hint": "给关键结论补量化支撑，每个数字后说明含义"
+    },
+    {
+      "id": "fix_structure",
+      "label_zh": "调整结构",
+      "desc_zh": "章节顺序或层级需要重排",
+      "ai_hint": "按逻辑重排章节，保持层级不跳级"
+    },
+    {
+      "id": "conclusion_callback",
+      "label_zh": "结论回扣主线",
+      "desc_zh": "结论没收住",
+      "ai_hint": "结论末尾加一句总括，回扣全文主线"
+    }
+  ],
+  "severities": [
+    { "id": "blocking", "label_zh": "必须改", "desc_zh": "不改不能交付" },
+    { "id": "should", "label_zh": "应该改", "desc_zh": "影响质量但不阻断" },
+    { "id": "optional", "label_zh": "可以试试", "desc_zh": "锦上添花" }
+  ]
+}

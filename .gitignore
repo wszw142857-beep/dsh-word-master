@@ -1,0 +1,22 @@
+# 依赖与构建产物
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# DSH 运行时产物（本地安装时可能落进来）
+.review/
+.review-lock.json
+review-notes.json
+review-result.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 打包产物
+*.tgz
+*.log

@@ -1,0 +1,239 @@
+# dsh-word-master bundle patch — 声明一个 agent preset「Word Master」。
+#
+# 这一行的 `name` 是官方声明行 `@deepseek-ai/dsh-agent-preset`，**不是**本包的
+# 包名：本 bundle 携带的是一份 **agent preset 定义**（工具组装 + 系统提示词）。
+#
+# 装载后效果：新建会话时，预设选择器里出现「Word Master」。
+# 它不会自动成为默认预设 —— 每个新会话各自选择。选它的会话里会出现本包的全套
+# word_* 工具与 skill；**不选它的会话完全不受影响**，不占任何上下文。
+#
+# ⚠ 为什么不是 `- id: word-master` + `name: 'dsh-word-master'`？
+#   那样装的是「host 侧 skill provider」，工具集不会出现，也不受预设约束。
+#   本包要的是「预设内组装」，所以走声明行。
+#
+# ⚠ insert 列表可以指向任意模块：`installBundle` 里那条「insert 的 name 必须
+#   等于包名」的约束只作用于**非 insert** 的覆盖补丁。所以这里写官方包名是对的。
+#
+# 想改预设（提示词、去掉某些工具、改默认 rank）：patch 只能按**顶层** id 匹配，
+# 预设内部的插件行（`word-master-tools`）不在索引里 —— 按嵌套 id 覆盖会报
+# `patch: entry "word-master-tools" not found`。必须整块替换 preset 的 config，
+# 把自己要保留的行原样带上（patch 是整块替换，不是深合并）：
+#
+#   - id: preset-word-master
+#     config:
+#       id: word-master
+#       plugins:
+#         - id: word-master-tools
+#           name: dsh-word-master
+#           config: { rank: 100 }
+
+- insert:
+    - id: preset-word-master
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: word-master
+        name: Word Master
+        description: 用工具集把素材做成规范 Word：偏好核对 → 规格冻结闸门 → 逐节写正文 → 质检门（P0 阻断）→ 审阅界面（改稿+提意见）→ 渲染闸门（必须看图）→ 导出 DOCX/PDF。用户写作偏好每轮自动注入，跨会话生效。
+        order: 11
+        plugins:
+          # ── 身份 ──────────────────────────────────────────────────────────
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              suffix: |-
+                你的工作目录是 {{cwd}}。
+              prefix: |-
+                你在执行 Word Master 流水线：把素材做成排版规范、可交付的 Word 文档。
+                全程中文（思考链与回复），代码/命令/路径原文保持原样。
+
+                ━━━ 最重要的四条 ━━━
+
+                一、规格未冻结，不许写正文。先提规格（标题/读者/文类/章节结构/
+                目标字数/语气），**完整停下**等用户确认，确认后才 word_spec
+                freeze。不要替用户拍板章节结构 —— 那是返工成本最高的一项。
+
+                二、P0 未清零，不许交付。word_gate 退出码 3 表示有 P0 阻断项
+                （全角括号/禁用词/缺章节/标题缺失/标题跳级）。改 draft.md 重建
+                重跑，直到退出码变 0 或 4。不要用"基本完成，就剩几个小问题"
+                这种说法糊过去。
+
+                三、审阅界面要用起来，也要关干净。word_gate 通过后调
+                word_review open 起本地页面，**把 URL 明确告诉用户**，然后等。
+                用户改完/提完意见（说"好了/继续"，或 word_review notes 能看到
+                内容）之后，**先 word_review stop 关掉服务器**，再读
+                review-notes.json 与 draft.md 按意见改。占着端口的僵尸进程比
+                没有界面更糟。
+
+                四、渲染闸门必须真的看图。word_render 出 PNG 后逐页看过才算过。
+                只看退出码就宣布完成是最常见的失职：字体回退、表格错位、标题
+                孤行在退出码里完全看不出来。
+
+                ━━━ 其余纪律 ━━━
+                - 串行执行：上一步产物是下一步输入；非硬停的相邻步骤可连续做完。
+                - 不投机执行：规格阶段不写正文，写正文阶段不排格式。
+                - 逐节写，禁止一次吐完整篇（会前后风格漂移）。
+                - 改稿先 word_read 看现状，别凭空重写。
+                - 偏好是约束不是建议 —— 质检门会真的查。
+                - 用户提新写作要求时，先 word_pref set 落盘；只在对话里答应
+                  是没用的，下一轮注入的还是旧偏好。
+                - 用户在审阅界面里的改动已经写回 draft.md，不要再重复改一遍，
+                  读文件看当前状态。
+                - 不手改 docx 的 XML：会破坏三线表与样式继承。
+                - 依赖缺失时把补齐命令交给用户，或征得同意后再装；不要假装
+                  跑通了。
+
+                ━━━ 工具用法 ━━━
+                开工先调 word_env 体检，再 word_pref read 确认偏好。之后每一步
+                该调哪个工具、卡在哪，见 skill `word-master-dsh`；详细流程与
+                判据在上游载荷的 references/flow.md 里按需读取。
+                所有脚本类工具都支持 extra_args（透传未建模旗标）与 cwd。
+
+          # 全局指令文件（~/.dsh/AGENTS.md 等）的注入阀值。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+
+          # ── shell ────────────────────────────────────────────────────────
+          # 保留 shell：用户可能要求跑别的命令，且部分排障需要。
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+
+          # ── 文件与检索 ────────────────────────────────────────────────────
+          # 逐节写 draft.md 的核心就是大量读写文件，这些是必需品。
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+
+          # ── skill ─────────────────────────────────────────────────────────
+          # 本包同时注册两个 skill：`word-master-dsh`（精简入口）与
+          # `word-master`（上游原文，含 references/）。
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+
+          # ── 目标与计划 ────────────────────────────────────────────────────
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: planning
+            name: cordis:group
+            group: true
+            isolate:
+              planMode: true
+            config:
+              - id: plan-mode
+                name: '@deepseek-ai/dsh-plan-mode'
+                config:
+                  section: |
+                    You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+                    Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+                    The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+                    Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+                    Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+                    When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+          # ── 压缩与委托 ────────────────────────────────────────────────────
+          # 长文档上下文压力大，压缩与子代理能力保留。
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+              - id: tool-subagent-list-agents
+                name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelectionSettings: true
+                  backgroundMode: continuable
+              - id: tool-subagent-fork
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: fork
+                  toolName: subagent_fork
+                  backgroundMode: continuable
+              # workflow-ptc 是 `ptcRuntime` 的提供者，而 `tool-workflow` 的
+              # inject 里有 workflowEngine —— 少了这一行，tool-workflow 会一直
+              # 停在 "waiting for workflowEngine"。
+              - id: workflow-ptc
+                name: '@deepseek-ai/dsh-workflow-ptc'
+                config:
+                  provider: spawn
+              - id: tool-workflow
+                name: '@deepseek-ai/dsh-tool-workflow'
+              # ralph 是自驱多轮循环；写作任务不需要，默认关掉。
+              - id: tool-ralph
+                name: '@deepseek-ai/dsh-tool-ralph'
+                disabled: true
+                config:
+                  subagentProvider: spawn
+                  maxRounds: 64
+
+          # ── 其余面向模型的工具 ────────────────────────────────────────────
+          # 规格确认、中途澄清都要问用户，所以保留。
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: false
+
+          # 网页检索：查参考资料、核对事实都用得上。
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+
+          # ══ 本包的工具集 ══════════════════════════════════════════════════
+          # 这一行才是真正的正文：加载 dsh-word-master，它注册全套 word_* 工具、
+          # 两个 skill provider，以及每轮注入的写作偏好小节。
+          #
+          # config.rank 默认 600（`BUNDLED_SKILL_RANK`），低于用户级
+          # `~/.agents/skills`（500）：机器上已有手工副本时那份继续优先。
+          # 想让插件压过手工副本，在这里设 rank: 100。
+          - id: word-master-tools
+            name: dsh-word-master

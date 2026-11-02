@@ -1,0 +1,62 @@
+{
+  "name": "dsh-word-master",
+  "version": "0.1.0",
+  "description": "Word Master for DeepSeek Harness — agent preset 形式提供全套 word_* 工具（偏好记忆→规格冻结→正文生成→质检门→排版渲染→导出 DOCX/PDF），只在选中该预设的会话里生效，不占用其他会话的上下文。",
+  "keywords": [
+    "dsh",
+    "dsh-bundle",
+    "dsh-plugin",
+    "dsh-preset",
+    "deepseek-harness",
+    "dsh-plugin-market",
+    "dshapp-plugin",
+    "word-master",
+    "word",
+    "docx",
+    "document",
+    "doc",
+    "writing",
+    "report",
+    "paper",
+    "thesis",
+    "academic-writing",
+    "preset",
+    "agent-preset",
+    "python-docx",
+    "ooxml",
+    "libreoffice"
+  ],
+  "license": "MIT",
+  "author": "dsh-word-master",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "skills",
+    "cordis.patch.yml",
+    "verify.mjs",
+    "README.md",
+    "ACKNOWLEDGEMENTS.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wszw142857-beep/dsh-word-master.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wszw142857-beep/dsh-word-master/issues"
+  },
+  "homepage": "https://github.com/wszw142857-beep/dsh-word-master#readme",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

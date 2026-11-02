@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Master — 审阅</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 左：段落目录 -->
+        <div id="panel-left">
+            <div class="panel-header">段落</div>
+            <div id="outline"></div>
+        </div>
+
+        <!-- 中：正文画布 -->
+        <div id="panel-center">
+            <div id="doc-nav">
+                <button id="nav-top" class="nav-btn" type="button" title="回到顶部">&laquo;</button>
+                <div id="nav-label">
+                    <span id="nav-counter">— 段</span>
+                    <span id="nav-name"></span>
+                </div>
+                <button id="nav-issue" class="nav-btn" type="button" title="下一个问题">问题 &rsaquo;</button>
+            </div>
+            <div id="doc-container">
+                <div id="doc-placeholder">载入中…</div>
+                <div id="doc-content" style="display:none;"></div>
+            </div>
+        </div>
+
+        <!-- 右：标注面板 -->
+        <div id="panel-right">
+            <div class="panel-header">编辑 / 标注</div>
+
+            <div id="status-line">
+                <span id="stat-p0">P0 0</span>
+                <span id="stat-p1">P1 0</span>
+                <span id="verdict-badge" class="badge">—</span>
+            </div>
+
+            <div id="selection-info">
+                <div class="section-label">已选段落</div>
+                <div id="selected-element" class="empty">点击正文中的段落开始</div>
+                <div id="element-props" style="display:none;"></div>
+            </div>
+
+            <div id="annotation-input" style="display:none;">
+                <div class="section-label">这一段的改法</div>
+                <div id="verdict-chips" class="chips"></div>
+                <textarea id="annotation-text" placeholder="具体怎么说，例如：两个数据合并成一句对比"></textarea>
+                <button id="btn-add-annotation">记下这条</button>
+            </div>
+
+            <div id="annotation-list">
+                <div class="section-label">本次已记录</div>
+                <div id="annotations"></div>
+            </div>
+
+            <div id="preview-actions">
+                <button id="btn-undo" class="btn-undo" disabled>撤销上一条</button>
+                <button id="btn-save" class="btn-save">提交标注</button>
+                <button id="btn-exit-preview" class="btn-exit-preview">退出预览</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-overlay" style="display:none;">
+        <div id="modal">
+            <div id="modal-message"></div>
+            <div id="modal-buttons">
+                <button id="modal-confirm">提交</button>
+                <button id="modal-cancel">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+    <script src="/static/app.js"></script>
+</body>
+</html>
