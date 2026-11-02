@@ -1,6 +1,6 @@
 {
   "name": "dsh-word-master",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Word Master for DeepSeek Harness — agent preset 形式提供全套 word_* 工具（偏好记忆→规格冻结→正文生成→质检门→排版渲染→导出 DOCX/PDF），只在选中该预设的会话里生效，不占用其他会话的上下文。",
   "keywords": [
     "dsh",
@@ -55,6 +55,11 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "scripts": {
+    "prepack": "node -e \"const fs=require('fs'),path=require('path');let n=0;const walk=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory()){if(e.name==='__pycache__'||e.name==='node_modules'){if(e.name==='__pycache__'){fs.rmSync(f,{recursive:true,force:true});n++;}}else walk(f);}else if(/\\.py[co]$/.test(e.name)){fs.unlinkSync(f);n++;}}};walk('skills');if(n)console.log('[prepack] 清掉 '+n+' 个 Python 字节码产物');\"",
+    "verify": "node verify.mjs",
+    "test": "node verify.mjs"
   },
   "engines": {
     "node": ">=22"

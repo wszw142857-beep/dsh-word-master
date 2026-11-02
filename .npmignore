@@ -1,0 +1,26 @@
+# Python 字节码 —— 绝不能进包。
+# 脚本住在 node_modules 里的已安装目录，Python 跑一次就会在旁边生成 __pycache__，
+# 若不排除，每次 publish 都会把几百 KB 的 .pyc 带上（实测 250 KB、16 个文件）。
+__pycache__/
+*.py[cod]
+*.pyo
+
+# 依赖与构建
+node_modules/
+
+# 运行时产物
+.review/
+.review-lock.json
+review-notes.json
+review-result.json
+*-report.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 打包残留
+*.tgz
+*.log
