@@ -44,11 +44,21 @@
 
 ## 安装
 
+### 从 npm（推荐）
+
+```bash
+dsh plugin --profile <你的profile> add dsh-word-master
+```
+
+包已发布到 npm：[dsh-word-master](https://www.npmjs.com/package/dsh-word-master)
+
+### 本地 link（改代码调试时用）
+
 ```bash
 dsh plugin --profile desktop add D:/dsh/plugins/dsh-word-master
 ```
 
-或者手工写进 profile 的 `dependencies`：
+或手工写进 profile 的 `dependencies`：
 
 ```json
 { "dsh-word-master": "link:D:/dsh/plugins/dsh-word-master" }
@@ -62,17 +72,22 @@ dsh plugin --profile desktop add D:/dsh/plugins/dsh-word-master
 装完重启 DSH，新建会话时预设选择器里出现 **「Word Master」**。
 **不选它的会话完全不受影响**，不占任何上下文。
 
-## 六步流水线
+## 流水线
 
 ```
+⓪ word_project  建项目 + 收素材
+⓪b word_convert 素材转 Markdown
 ① word_env      体检（Python / python-docx / lxml / LibreOffice）
 ② word_pref     偏好核对（read / set / memory_text）
+   word_template 套模板（可选）
 ③ word_spec     规格冻结 ← 硬停，等用户确认
 ④ 写 draft.md   逐节写，遵守已注入的偏好
-⑤ word_gate     质检门 ← 硬停，P0 阻断交付
-⑥ word_review   HTML 审阅界面 ← 硬停，等用户逐段设决定
-⑦ word_render   渲染闸门 ← 必须逐页看图
-⑧ word_export   导出 DOCX / PDF
+⑤ word_build    构建 docx
+⑥ word_gate     质检门 ← 硬停，P0 阻断交付
+⑦ word_review   HTML 审阅界面 ← 硬停，等用户逐段设决定
+⑧ word_render   渲染闸门 + word_visual 视觉判据
+⑨ word_export   导出 DOCX / PDF
+
 ```
 
 ## 审阅界面（`word_review`）
