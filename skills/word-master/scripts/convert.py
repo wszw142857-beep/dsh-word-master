@@ -78,7 +78,7 @@ def _write(out_dir: Path, stem: str, markdown: str) -> Path:
 # ── PDF ───────────────────────────────────────────────────────────────────
 
 
-def convert_pdf(source: Path, out_dir: Path) -> dict:
+def convert_pdf(source: Path, out_dir: Path, stem: str | None = None) -> dict:
     """PDF → Markdown。
 
     难点是**标题层级**：PDF 没有语义标签，只能按字号推断。做法是统计全文的
@@ -158,7 +158,7 @@ def convert_pdf(source: Path, out_dir: Path) -> dict:
             lines_out.append("")
 
     markdown = "\n".join(lines_out)
-    target = _write(out_dir, _safe_stem(source), markdown)
+    target = _write(out_dir, stem or _safe_stem(source), markdown)
     return {
         "ok": True,
         "kind": "pdf",
@@ -188,7 +188,7 @@ def _join_paragraph(lines: list[str]) -> str:
 # ── DOCX ──────────────────────────────────────────────────────────────────
 
 
-def convert_docx(source: Path, out_dir: Path) -> dict:
+def convert_docx(source: Path, out_dir: Path, stem: str | None = None) -> dict:
     """Word → Markdown。
 
     走 mammoth（docx → HTML）再 markdownify（HTML → Markdown）这条链，而不是
@@ -221,7 +221,8 @@ def convert_docx(source: Path, out_dir: Path) -> dict:
         "p[style-name='标题 4'] => h5:fresh\n"
     )
 
-    resource_dir = out_dir / f"{_safe_stem(source)}_files"
+    base_stem = stem or _safe_stem(source)
+    resource_dir = out_dir / f"{base_stem}_files"
     resource_dir.mkdir(parents=True, exist_ok=True)
     images: list[str] = []
 
@@ -232,7 +233,7 @@ def convert_docx(source: Path, out_dir: Path) -> dict:
         name = f"image-{len(images) + 1}{_guess_ext(image.content_type)}"
         (resource_dir / name).write_bytes(data)
         images.append(name)
-        return {"src": f"{_safe_stem(source)}_files/{name}"}
+        return {"src": f"{base_stem}_files/{name}"}
 
     with source.open("rb") as fh:
         result = mammoth.convert_to_html(
@@ -245,7 +246,7 @@ def convert_docx(source: Path, out_dir: Path) -> dict:
 
     markdown = md(html, heading_style="ATX", strip=["script", "style"])
     markdown = _fix_docx_markdown(markdown)
-    target = _write(out_dir, _safe_stem(source), markdown)
+    target = _write(out_dir, stem or _safe_stem(source), markdown)
 
     if not images:
         try:
@@ -344,7 +345,7 @@ def _guess_ext(content_type: str | None) -> str:
 # ── XLSX ──────────────────────────────────────────────────────────────────
 
 
-def convert_xlsx(source: Path, out_dir: Path) -> dict:
+def convert_xlsx(source: Path, out_dir: Path, stem: str | None = None) -> dict:
     """Excel → Markdown 表格。
 
     每个 sheet 一节，输出为管道表格。第一行当表头（Excel 数据表几乎都这样）。
@@ -390,7 +391,7 @@ def convert_xlsx(source: Path, out_dir: Path) -> dict:
         return {"ok": False, "reason": "empty-workbook", "message": "工作簿里没有数据"}
 
     markdown = "\n".join(parts)
-    target = _write(out_dir, _safe_stem(source), markdown)
+    target = _write(out_dir, stem or _safe_stem(source), markdown)
     return {"ok": True, "kind": "xlsx", "markdown": str(target), "sheets": sheet_info}
 
 
@@ -402,7 +403,7 @@ def _cell(value: str) -> str:
 # ── PPTX ──────────────────────────────────────────────────────────────────
 
 
-def convert_pptx(source: Path, out_dir: Path) -> dict:
+def convert_pptx(source: Path, out_dir: Path, stem: str | None = None) -> dict:
     """PowerPoint → Markdown。
 
     每页一节。标题占位符当 `##`，其余文本框按段落输出，列表保留层级。
@@ -451,7 +452,7 @@ def convert_pptx(source: Path, out_dir: Path) -> dict:
         return {"ok": False, "reason": "empty-deck", "message": "演示文稿里没有文本"}
 
     markdown = "\n".join(parts)
-    target = _write(out_dir, _safe_stem(source), markdown)
+    target = _write(out_dir, stem or _safe_stem(source), markdown)
     return {"ok": True, "kind": "pptx", "markdown": str(target), "slides": slide_info}
 
 
@@ -540,10 +541,10 @@ def convert(kind: str, source: str, out_dir: Path, stem: str | None = None) -> d
         kind = detect_kind(source)
 
     if kind == "pdf":
-        return convert_pdf(Path(source), out_dir)
+        return convert_pdf(Path(source), out_dir, stem)
 
     if kind == "docx":
-        return convert_docx(Path(source), out_dir)
+        return convert_docx(Path(source), out_dir, stem)
 
     if kind == "docx-legacy":
         return {
@@ -554,10 +555,10 @@ def convert(kind: str, source: str, out_dir: Path, stem: str | None = None) -> d
         }
 
     if kind == "xlsx":
-        return convert_xlsx(Path(source), out_dir)
+        return convert_xlsx(Path(source), out_dir, stem)
 
     if kind == "pptx":
-        return convert_pptx(Path(source), out_dir)
+        return convert_pptx(Path(source), out_dir, stem)
 
     if kind == "web":
         return convert_web(source, out_dir, stem or "web")

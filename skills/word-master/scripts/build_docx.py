@@ -388,7 +388,13 @@ def build(project: Path, input_name: str, output_name: str) -> dict:
     for kind, payload in blocks:
         if kind == "heading":
             level, heading_text = payload
-            heading = document.add_heading(heading_text, level=min(level, 4))
+            # 层级映射必须与 convert.py 的 style_map 对称，否则往返会丢一级：
+            #   convert 把 Word 的 Title → `#`，Heading 1 → `##`
+            #   这里就必须把 `#` → Title，`##` → Heading 1
+            # 早期直接把 `#` 写成 Heading 1，于是 build→convert 往返把文档
+            # 主标题降成了章节级（CI 断言"缺一级标题"抓到的就是这个）。
+            word_level = 0 if level == 1 else min(level - 1, 9)
+            heading = document.add_heading(heading_text, level=word_level)
             for run in heading.runs:
                 set_run_font(run, cfg["latinFont"], cfg["bodyFont"])
             heading_count += 1

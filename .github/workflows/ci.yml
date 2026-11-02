@@ -238,17 +238,23 @@ jobs:
           python "$S/spec.py" init --project "$T" --title "CI 端到端测试" >/dev/null
           python "$S/spec.py" freeze --project "$T" >/dev/null
 
-          cat > "$T/draft.md" <<'DRAFT'
-          # CI 端到端测试
-
-          ## 工作背景
-
-          为了验证流水线可用，需要跑通从素材到交付的每一步。
-
-          ## 结果与分析
-
-          所有闸门均正常(半角括号)。
-          DRAFT
+          # 用 python 写固定稿子，避开 heredoc 在 YAML 里的缩进问题
+          # （heredoc 内容带前导空格会让 "# 标题" 变成 Markdown 代码块）
+          python - "$T/draft.md" <<'PYEOF'
+          import sys
+          lines = [
+              "# CI 端到端测试",
+              "",
+              "## 工作背景",
+              "",
+              "为了验证流水线可用，需要跑通从素材到交付的每一步。",
+              "",
+              "## 结果与分析",
+              "",
+              "所有闸门均正常(半角括号)。",
+          ]
+          open(sys.argv[1], "w", encoding="utf-8").write("\n".join(lines) + "\n")
+          PYEOF
 
           python "$S/build_docx.py" --project "$T"
           test -f "$T/output.docx" || { echo "::error::build 没产出 docx"; exit 1; }
@@ -336,10 +342,56 @@ jobs:
           print("✓ import-sources 自动转换并生成 draft.md")
           EOF
           test -f "$D/draft.md" || { echo "::error::draft.md 未生成"; exit 1; }
-          # 层级必须正确：文档标题 # ，章节 ##
-          grep -qE '^# .+' "$D/draft.md" || { echo "::error::缺一级标题"; exit 1; }
-          grep -qE '^## .+' "$D/draft.md" || { echo "::error::章节未降为二级标题"; exit 1; }
-          echo "✓ 标题层级正确"
+          echo "✓ drop-in 生成 draft.md"
+
+      - name: Heading levels survive a round trip
+        shell: bash
+        run: |
+          # 这是核心不变量：md → docx → md 层级必须一模一样。
+          # 首次 CI 就是栽在这里——build 把 `#` 写成 Heading 1，而 convert
+          # 把 Heading 1 读成 `##`，往返降一级，文档主标题变成章节级。
+          S=skills/word-master/scripts
+          R=$(mktemp -d)
+          # 同样用 python 写，避免 heredoc 在 YAML 里的缩进陷阱
+          python - "$R/draft.md" <<'PYEOF'
+          import sys
+          lines = [
+              "# 主标题",
+              "",
+              "## 第一章",
+              "",
+              "正文。",
+              "",
+              "### 第一节",
+              "",
+              "子节。",
+              "",
+              "## 第二章",
+              "",
+              "结尾。",
+          ]
+          open(sys.argv[1], "w", encoding="utf-8").write("\n".join(lines) + "\n")
+          PYEOF
+          python "$S/build_docx.py" --project "$R" >/dev/null
+          python "$S/convert.py" --kind docx --input "$R/output.docx" --out-dir "$R/rt" --stem rt >/dev/null
+          export SRC="$R/draft.md" DST="$R/rt/rt.md"
+          python - <<'EOF'
+          import re, sys
+          def levels(path):
+              out = []
+              for line in open(path, encoding="utf-8"):
+                  m = re.match(r"^(#+)\s", line)
+                  if m:
+                      out.append(len(m.group(1)))
+              return out
+          a = levels(__import__("os").environ["SRC"])
+          b = levels(__import__("os").environ["DST"])
+          print("原文层级:", a)
+          print("往返层级:", b)
+          assert a == b, f"层级往返不一致：{a} != {b}"
+          assert a and a[0] == 1, "主标题不是一级"
+          print("✓ 层级往返一致")
+          EOF
 
       - name: Existing draft must not be overwritten
         shell: bash
