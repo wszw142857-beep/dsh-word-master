@@ -1,0 +1,333 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一分支的新推送取消旧的运行，省 runner 时间
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 主检查：Node × 三平台 + 两个 Node 版本 ───────────────────────────────
+  # 为什么跨平台：这个插件大量依赖路径处理（Windows 反斜杠、junction、
+  # Python 解释器探测），只在 Linux 跑会漏掉 Windows 专有的坑。
+  verify:
+    name: verify (${{ matrix.os }} · node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['22', '24']
+        exclude:
+          # macOS 上再跑两个 Node 版本性价比低，只留 22
+          - os: macos-latest
+            node: '24'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 自检里有「核心依赖必须可导入」这一条，缺了会 FAIL。
+      # 转换类依赖是可选的（缺了只 WARN），但装上才能覆盖到那些检查。
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install python-docx lxml
+          python -m pip install pymupdf mammoth markdownify openpyxl python-pptx beautifulsoup4 requests
+
+      - name: Show environment
+        shell: bash
+        run: |
+          node --version
+          python --version
+          python -c "import docx, lxml; print('core deps ok')"
+
+      - name: Run self-check
+        shell: bash
+        run: node verify.mjs
+
+  # ── 打包完整性：确认包体不含垃圾，且体积合理 ─────────────────────────────
+  pack:
+    name: package integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Pack (prepack should clean bytecode)
+        shell: bash
+        run: |
+          # 先造出 __pycache__，验证 prepack 真的会清掉
+          mkdir -p skills/word-master/scripts/__pycache__
+          echo "fake" > skills/word-master/scripts/__pycache__/fake.cpython-312.pyc
+          npm pack --dry-run 2>&1 | tee /tmp/pack.full.log
+          # ⚠ 只保留 "Tarball Contents" 清单段。
+          # 整份日志里含 prepack 命令原文，其中就有 "__pycache__" 这个字符串——
+          # 直接 grep 整份日志会误报（本地实测踩到）。清单段每行形如
+          # "npm notice 17.2kB skills/.../build_docx.py"。
+          sed -n '/Tarball Contents/,/Tarball Details/p' /tmp/pack.full.log > /tmp/pack.log
+          echo "--- 清单行数: $(grep -c 'kB\|B ' /tmp/pack.log) ---"
+
+      - name: Assert no bytecode in tarball
+        shell: bash
+        run: |
+          # 只看清单段，且要求是真实文件行（含路径分隔符）
+          if grep -E '^npm notice [0-9.]+[k]?B .*\.pyc' /tmp/pack.log; then
+            echo "::error::tarball 里混进了 Python 字节码"
+            exit 1
+          fi
+          if grep -E '^npm notice [0-9.]+[k]?B .*__pycache__' /tmp/pack.log; then
+            echo "::error::tarball 里混进了 __pycache__ 目录"
+            exit 1
+          fi
+          echo "✓ 无字节码产物"
+
+      - name: Assert required files present
+        shell: bash
+        run: |
+          for f in cordis.patch.yml lib/index.js lib/tools.js skills/word-master/SKILL.md \
+                   skills/word-master/scripts/review_ui/index.html LICENSE README.md; do
+            if ! grep -q "$f" /tmp/pack.log; then
+              echo "::error::tarball 缺少 $f"
+              exit 1
+            fi
+          done
+          echo "✓ 关键文件齐全"
+
+      - name: Check tarball size
+        shell: bash
+        run: |
+          size=$(grep -oE 'package size: [0-9.]+ [kM]B' /tmp/pack.full.log | head -1 | sed 's/package size: //')
+          echo "包体: ${size:-未知}"
+          if [ -z "$size" ]; then
+            echo "::error::读不到包体大小"
+            exit 1
+          fi
+          kb=$(echo "$size" | grep -oE '^[0-9.]+')
+          kb=${kb%%.*}
+          if echo "$size" | grep -q 'M'; then
+            echo "::error::包体异常偏大（$size）"
+            exit 1
+          fi
+          if [ "${kb:-0}" -gt 500 ]; then
+            echo "::error::包体异常偏大（$size），检查是否混入无关文件"
+            exit 1
+          fi
+          echo "✓ 体积正常（$size）"
+
+  # ── 安装冒烟：从 tarball 装进干净目录，验证能加载 ─────────────────────────
+  smoke:
+    name: install smoke test
+    runs-on: ubuntu-latest
+    needs: pack
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install python-docx lxml
+
+      - name: Pack and install into clean dir
+        shell: bash
+        run: |
+          npm pack
+          TARBALL=$(ls -1 dsh-word-master-*.tgz | head -1)
+          echo "tarball: $TARBALL"
+          mkdir -p /tmp/smoke && cd /tmp/smoke
+          npm init -y >/dev/null 2>&1
+          npm install "/${GITHUB_WORKSPACE}/${TARBALL}" --no-audit --no-fund
+          echo "SMOKE_DIR=/tmp/smoke" >> $GITHUB_ENV
+
+      - name: Assert package loads and registers tools
+        shell: bash
+        working-directory: /tmp/smoke
+        run: |
+          node --input-type=module -e "
+          import { pathToFileURL } from 'node:url';
+          import { resolve } from 'node:path';
+          const entry = pathToFileURL(resolve('node_modules/dsh-word-master/lib/index.js')).href;
+          const m = await import(entry);
+          if (m.name !== 'dsh-word-master') throw new Error('name mismatch: ' + m.name);
+          if (typeof m.apply !== 'function') throw new Error('apply missing');
+          if (!Array.isArray(m.inject) || !m.inject.includes('tools')) throw new Error('inject wrong');
+          const defs = m.__internals.createToolDefinitions({ skillDir: m.__internals.resolveSkillDir() });
+          if (defs.length !== 14) throw new Error('expected 14 tools, got ' + defs.length);
+          const names = defs.map(d => d.name);
+          for (const required of ['word_convert','word_gate','word_review','word_project','word_visual','word_template']) {
+            if (!names.includes(required)) throw new Error('missing tool: ' + required);
+          }
+          const skill = await m.__internals.loadSkill('word-master');
+          if (skill.content.includes('\${SKILL_DIR}')) throw new Error('SKILL_DIR not expanded');
+          console.log('✓ 14 tools registered, skill loads, placeholders expanded');
+          "
+
+      - name: Assert entry scripts exist on disk
+        shell: bash
+        working-directory: /tmp/smoke
+        run: |
+          base=node_modules/dsh-word-master/skills/word-master/scripts
+          for f in build_docx.py gate.py review_server.py convert.py project.py visual_check.py template.py; do
+            [ -f "$base/$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          for f in review_ui/index.html review_ui/app.js review_ui/style.css review_ui/catalogs.json; do
+            [ -f "$base/$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          echo "✓ 脚本与界面资源齐全"
+
+  # ── 端到端：真跑一遍流水线 ────────────────────────────────────────────────
+  e2e:
+    name: end-to-end pipeline
+    runs-on: ubuntu-latest
+    needs: pack
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install python-docx lxml pymupdf mammoth markdownify
+
+      - name: Build a project from scratch
+        shell: bash
+        run: |
+          S=skills/word-master/scripts
+          T=$(mktemp -d)
+          echo "PROJ=$T" >> $GITHUB_ENV
+
+          python "$S/project.py" init "$T" --title "CI 端到端测试" >/dev/null
+          python "$S/spec.py" init --project "$T" --title "CI 端到端测试" >/dev/null
+          python "$S/spec.py" freeze --project "$T" >/dev/null
+
+          cat > "$T/draft.md" <<'DRAFT'
+          # CI 端到端测试
+
+          ## 工作背景
+
+          为了验证流水线可用，需要跑通从素材到交付的每一步。
+
+          ## 结果与分析
+
+          所有闸门均正常(半角括号)。
+          DRAFT
+
+          python "$S/build_docx.py" --project "$T"
+          test -f "$T/output.docx" || { echo "::error::build 没产出 docx"; exit 1; }
+
+      - name: Gate must pass
+        shell: bash
+        run: |
+          S=skills/word-master/scripts
+          set +e
+          python "$S/gate.py" --project "$PROJ" --json > /tmp/gate.json 2>/dev/null
+          code=$?
+          set -e
+          echo "gate exit=$code"
+          # 0=PASS 4=只有P1 都算通过；3=有P0 视为失败
+          if [ "$code" -eq 3 ]; then
+            echo "::error::质检门有 P0"
+            cat /tmp/gate.json
+            exit 1
+          fi
+          if [ "$code" -ge 2 ] && [ "$code" -ne 4 ]; then
+            echo "::error::质检门异常退出 ($code)"
+            cat /tmp/gate.json
+            exit 1
+          fi
+          echo "✓ 质检门通过"
+
+      - name: Gate must detect violations
+        shell: bash
+        run: |
+          # 反向验证：故意写全角括号，门禁必须报 P0
+          S=skills/word-master/scripts
+          printf '\n## 附注\n\n这里故意用全角括号（测试）。\n' >> "$PROJ/draft.md"
+          python "$S/build_docx.py" --project "$PROJ" >/dev/null
+          set +e
+          python "$S/gate.py" --project "$PROJ" --json > /tmp/gate2.json 2>/dev/null
+          code=$?
+          set -e
+          if [ "$code" -ne 3 ]; then
+            echo "::error::门禁没抓到全角括号（退出码 $code）"
+            cat /tmp/gate2.json
+            exit 1
+          fi
+          echo "✓ 门禁正确阻断"
+
+      - name: Project validate detects stale report
+        shell: bash
+        run: |
+          S=skills/word-master/scripts
+          # 改稿但不重跑门禁 → stale-gate 应出现
+          echo "" >> "$PROJ/draft.md"
+          python "$S/project.py" validate "$PROJ" > /tmp/val.json 2>/dev/null || true
+          if ! grep -q "stale-gate" /tmp/val.json; then
+            echo "::warning::没检出 stale-gate（可能是时序太快，mtime 相同）"
+          else
+            echo "✓ 检出了报告过期"
+          fi
+
+      - name: Convert round-trip
+        shell: bash
+        run: |
+          S=skills/word-master/scripts
+          OUT=$(mktemp -d)
+          # docx 转 markdown，再确认内容在
+          python "$S/convert.py" --kind docx --input "$PROJ/output.docx" --out-dir "$OUT"
+          f=$(ls "$OUT"/*.md | head -1)
+          echo "converted: $f"
+          grep -q "工作背景" "$f" || { echo "::error::转换丢了内容"; exit 1; }
+          echo "✓ 素材转换可用"
+
+      - name: Export with PDF
+        shell: bash
+        run: |
+          S=skills/word-master/scripts
+          # LibreOffice 在 ubuntu-latest 上预装；缺了也不该 FATAL
+          if command -v soffice >/dev/null 2>&1 || [ -x /usr/bin/soffice ]; then
+            echo "LibreOffice 可用"
+          else
+            echo "::warning::LibreOffice 不可用，渲染闸门会降级（这是设计行为）"
+          fi
+          python "$S/export.py" --project "$PROJ" --name final.docx || true
+          test -f "$PROJ/final.docx" || { echo "::error::导出没产出"; exit 1; }
+          echo "✓ 导出成功"
