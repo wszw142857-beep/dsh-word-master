@@ -162,7 +162,25 @@ function renderDoc() {
         if (lineIssues.some((i) => i.severity === 'P0')) div.classList.add('hl-p0');
         else if (lineIssues.some((i) => i.severity === 'P1')) div.classList.add('hl-p1');
 
-        if (decisionFor(b.line)) div.classList.add('annotated');
+        // 已批注：整块黄框 + 段落下方的批注摘要条。
+        // 批注摘要写进块内（而不是只放右栏），这样滚动正文时一眼能看到
+        // "这段我要 AI 干什么"，不用来回看侧栏。
+        const decision = decisionFor(b.line);
+        if (decision) {
+            div.classList.add('annotated');
+            div.dataset.cmtCount = '✎ 已批注';
+            const labels = (decision.verdicts || []).map(verdictLabel);
+            const note = el('div', 'block-note');
+            // 批注条不是正文：禁止编辑，否则既会被误改，也会被 readBlockFromDom 读进去
+            note.contentEditable = 'false';
+            if (labels.length > 0) {
+                note.appendChild(el('span', 'tag', labels.join(' · ')));
+            } else {
+                note.appendChild(el('span', 'tag', '已批注'));
+            }
+            if (decision.note) note.appendChild(el('span', 'txt', decision.note));
+            div.appendChild(note);
+        }
         if (state.selected && state.selected.line === b.line) div.classList.add('selected');
 
         // 点选：选中该段并展示到右栏
@@ -428,19 +446,31 @@ function describeFail(res) {
     return '未知';
 }
 
+/**
+ * 从 DOM 读取某块的正文（还原成 Markdown 原样行）。
+ *
+ * 必须剔除两类附属节点：
+ *   - `.ln`        行号角标
+ *   - `.block-note` 批注摘要条
+ * 它们都是界面元素，不是正文。用 cloneNode 拷一份再删，避免动到真实 DOM。
+ */
 function readBlockFromDom(block) {
     const node = document.querySelector(`.block[data-line="${block.line}"]`);
     if (!node) return null;
+
+    const clean = node.cloneNode(true);
+    for (const junk of clean.querySelectorAll('.ln, .block-note')) junk.remove();
+    const text = (clean.textContent || '').trim();
+
     if (block.kind === 'heading') {
-        const h = node.querySelector('h1,h2,h3,h4');
-        return '#'.repeat(block.level || 1) + ' ' + ((h ? h.textContent : '') || '').trim();
+        return '#'.repeat(block.level || 1) + ' ' + text;
     }
     if (block.kind === 'list') {
         const prefix = (block.raw.match(/^\s*(?:[-*]|\d+[.)])\s*/) || [''])[0];
-        return prefix + node.textContent.trim();
+        return prefix + text;
     }
-    if (block.kind === 'quote') return '> ' + node.textContent.trim();
-    return node.textContent.trim();
+    if (block.kind === 'quote') return '> ' + text;
+    return text;
 }
 
 // ── 导航 ──────────────────────────────────────────────────────────────────
