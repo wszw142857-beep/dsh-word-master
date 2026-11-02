@@ -194,12 +194,32 @@ def convert_docx(source: Path, out_dir: Path) -> dict:
     走 mammoth（docx → HTML）再 markdownify（HTML → Markdown）这条链，而不是
     直接用 python-docx 遍历段落：mammoth 能正确保留列表编号、嵌套、表格结构与
     粗斜体，自己遍历要重新实现一遍这些语义，且很容易漏。
+
+    ⚠ **必须自定义 style_map**。mammoth 默认把 Word 的 `Title` 与 `Heading 1`
+    都映射成 `<h1>` —— 于是"文档大标题"和"第一章"变成同一级，层级被压平，
+    审阅与重建都会受影响。这里把 Title 单独映射成 h1、Heading 1/2/3 顺延成
+    h2/h3/h4，恢复"标题 > 章 > 节"的真实结构。
     """
     try:
         import mammoth
         from markdownify import markdownify as md
     except ImportError as exc:
         return {"ok": False, "reason": "missing-dep", "message": f"缺少依赖：{exc}（pip install mammoth markdownify）"}
+
+    # Word 样式 → HTML 标签。左侧是样式名，右侧是目标标签。
+    style_map = (
+        "p[style-name='Title'] => h1:fresh\n"
+        "p[style-name='标题'] => h1:fresh\n"
+        "p[style-name='Subtitle'] => p:fresh\n"
+        "p[style-name='Heading 1'] => h2:fresh\n"
+        "p[style-name='标题 1'] => h2:fresh\n"
+        "p[style-name='Heading 2'] => h3:fresh\n"
+        "p[style-name='标题 2'] => h3:fresh\n"
+        "p[style-name='Heading 3'] => h4:fresh\n"
+        "p[style-name='标题 3'] => h4:fresh\n"
+        "p[style-name='Heading 4'] => h5:fresh\n"
+        "p[style-name='标题 4'] => h5:fresh\n"
+    )
 
     resource_dir = out_dir / f"{_safe_stem(source)}_files"
     resource_dir.mkdir(parents=True, exist_ok=True)
@@ -215,7 +235,11 @@ def convert_docx(source: Path, out_dir: Path) -> dict:
         return {"src": f"{_safe_stem(source)}_files/{name}"}
 
     with source.open("rb") as fh:
-        result = mammoth.convert_to_html(fh, convert_image=mammoth.images.img_element(save_image))
+        result = mammoth.convert_to_html(
+            fh,
+            convert_image=mammoth.images.img_element(save_image),
+            style_map=style_map,
+        )
     html = result.value
     messages = [str(m) for m in result.messages][:10]
 

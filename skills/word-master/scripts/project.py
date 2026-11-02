@@ -50,8 +50,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -158,11 +160,62 @@ def _is_url(value: str) -> bool:
     return bool(re.match(r"^https?://", value, re.IGNORECASE))
 
 
-def cmd_import(project: Path, sources: list[str], move: bool) -> dict:
-    """把素材收进项目并转换。
+def _run_convert(kind: str, source: str, out_dir: Path, stem: str) -> dict:
+    """调用 convert.py，返回转换结果。
+
+    用子进程而不是 import：convert.py 依赖一堆可选库（pymupdf/mammoth/
+    openpyxl/python-pptx/bs4），import 进来会让 project.py 也背上这些依赖。
+    子进程失败只是"这次转换不成功"，不影响 import-sources 本身。
+    """
+    script = Path(__file__).resolve().parent / "convert.py"
+    if not script.is_file():
+        return {"ok": False, "reason": "missing-converter", "message": "找不到 convert.py"}
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(script), "--kind", kind, "--input", source, "--out-dir", str(out_dir), "--stem", stem],
+            capture_output=True,
+            timeout=300,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"},
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "reason": "convert-failed", "message": str(exc)[:200]}
+
+    text = (completed.stdout or b"").decode("utf-8", errors="replace").strip()
+    if completed.returncode != 0:
+        return {"ok": False, "reason": "convert-failed", "message": text[:300] or f"退出码 {completed.returncode}"}
+    try:
+        return json.loads(text.splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        return {"ok": False, "reason": "convert-bad-output", "message": text[:200]}
+
+
+def _promote_to_draft(converted_path: Path, project: Path) -> str | None:
+    """把转换结果提升为项目的 draft.md。
+
+    只在**项目还没有 draft.md** 时做，且只做一次（第一份文档类素材）。
+    理由：用户丢一份成品文档过来，最想做的第一件事就是"打开它改"，而不是先
+    自己把 md 挪成 draft.md。但这不能覆盖已有稿子——那等于把用户的工作抹掉。
+    """
+    draft = project / "draft.md"
+    if draft.is_file():
+        return None
+    try:
+        shutil.copy2(converted_path, draft)
+    except OSError:
+        return None
+    return str(draft)
+
+
+def cmd_import(project: Path, sources: list[str], move: bool, convert: bool = True) -> dict:
+    """把素材收进项目，可选地就地转换。
 
     本地文件默认**复制**（不 move）—— 用户的原始文件不该因为我们收素材就消失。
     只有在显式 --move 时才移动。
+
+    `convert=True` 时，文档类素材会立刻转成 Markdown 放进 `converted/`，
+    并且**如果项目还没有 draft.md**，第一份转换结果会被提升为 draft.md，
+    这样"丢一份成品文档进来 → 直接开审阅台改"就是一条命令的事。
     """
     if not project.is_dir():
         return {"ok": False, "reason": "missing-project", "message": f"{project} 不存在，先 init"}
@@ -177,10 +230,20 @@ def cmd_import(project: Path, sources: list[str], move: bool) -> dict:
 
     imported: list[dict] = []
     skipped: list[dict] = []
+    conversions: list[dict] = []
+    promoted: str | None = None
 
     for raw in sources:
         if _is_url(raw):
-            imported.append({"kind": "url", "source": raw, "dest": None, "convert": "web"})
+            stem = f"web_{len(conversions) + 1}"
+            entry = {"kind": "url", "source": raw, "dest": None, "convert": "web"}
+            imported.append(entry)
+            if convert:
+                result = _run_convert("web", raw, converted_dir, stem)
+                conversions.append({"source": raw, "ok": result.get("ok"), "markdown": result.get("markdown"),
+                                    "error": result.get("message")})
+                if result.get("ok") and promoted is None:
+                    promoted = _promote_to_draft(Path(result["markdown"]), project)
             continue
 
         src = Path(raw).expanduser()
@@ -192,8 +255,11 @@ def cmd_import(project: Path, sources: list[str], move: bool) -> dict:
         if suffix in TEXT_SUFFIXES:
             # 已经是 Markdown/文本，直接放进 converted/
             dest = converted_dir / src.name
-            shutil.copy2(src, dest)
+            if dest.resolve() != src.resolve():
+                shutil.copy2(src, dest)
             imported.append({"kind": "text", "source": str(src), "dest": str(dest), "convert": None})
+            if promoted is None:
+                promoted = _promote_to_draft(dest, project)
             continue
 
         if suffix in CONVERTIBLE:
@@ -205,6 +271,14 @@ def cmd_import(project: Path, sources: list[str], move: bool) -> dict:
             else:
                 shutil.copy2(src, dest)
             imported.append({"kind": "document", "source": str(src), "dest": str(dest), "convert": suffix.lstrip(".")})
+
+            if convert:
+                stem = re.sub(r"[^\w\u4e00-\u9fff-]+", "_", dest.stem).strip("_") or "doc"
+                result = _run_convert(dest.suffix.lstrip("."), str(dest), converted_dir, stem)
+                conversions.append({"source": str(dest), "ok": result.get("ok"),
+                                    "markdown": result.get("markdown"), "error": result.get("message")})
+                if result.get("ok") and promoted is None:
+                    promoted = _promote_to_draft(Path(result["markdown"]), project)
             continue
 
         skipped.append({"source": raw, "reason": f"unsupported-suffix:{suffix}"})
@@ -218,12 +292,23 @@ def cmd_import(project: Path, sources: list[str], move: bool) -> dict:
             known.add(key)
     save_manifest(project, manifest)
 
+    next_step = None
+    if promoted:
+        next_step = "直接开审阅台：word_review action=open"
+    elif any(not c.get("ok") for c in conversions):
+        next_step = "部分素材转换失败，见 conversions[].error；可用 word_convert 单独重试"
+    elif imported:
+        next_step = "写 draft.md，或 word_spec init 建规格"
+
     return {
         "ok": True,
         "imported": imported,
         "skipped": skipped,
+        "conversions": conversions,
+        "promotedToDraft": promoted,
+        "draftCreated": promoted is not None,
         "registered": len(registered),
-        "next": "对 document 类素材跑 word_convert 转成 Markdown" if any(e.get("convert") for e in imported) else None,
+        "next": next_step,
     }
 
 
@@ -493,6 +578,11 @@ def main(argv: list[str] | None = None) -> int:
     imp_p.add_argument("project")
     imp_p.add_argument("sources", nargs="+")
     imp_p.add_argument("--move", action="store_true", help="移动而非复制本地文件")
+    imp_p.add_argument(
+        "--no-convert",
+        action="store_true",
+        help="只收素材不转换（默认会转换，并把第一份转换结果提升为 draft.md）",
+    )
 
     val_p = sub.add_parser("validate")
     val_p.add_argument("project")
@@ -510,7 +600,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.action == "import-sources":
-        result = cmd_import(project, args.sources, args.move)
+        result = cmd_import(project, args.sources, args.move, convert=not args.no_convert)
         emit(result)
         return 0 if result.get("ok") else 2
 

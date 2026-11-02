@@ -318,6 +318,46 @@ jobs:
           grep -q "工作背景" "$f" || { echo "::error::转换丢了内容"; exit 1; }
           echo "✓ 素材转换可用"
 
+      - name: Drop-in existing docx becomes a reviewable project
+        shell: bash
+        run: |
+          # 模拟真实场景：用户丢一份成品 docx 进来，一步就该能开审阅台
+          S=skills/word-master/scripts
+          D=$(mktemp -d)
+          python "$S/project.py" init "$D" --title "丢进来的成品" >/dev/null
+          python "$S/project.py" import-sources "$D" "$PROJ/output.docx" > /tmp/imp.json
+          python - <<'EOF'
+          import json, sys
+          d = json.load(open("/tmp/imp.json", encoding="utf-8"))
+          assert d["ok"], d
+          assert d["draftCreated"], "未生成 draft.md"
+          assert d["promotedToDraft"], "未提升为 draft"
+          assert d["conversions"] and d["conversions"][0]["ok"], d["conversions"]
+          print("✓ import-sources 自动转换并生成 draft.md")
+          EOF
+          test -f "$D/draft.md" || { echo "::error::draft.md 未生成"; exit 1; }
+          # 层级必须正确：文档标题 # ，章节 ##
+          grep -qE '^# .+' "$D/draft.md" || { echo "::error::缺一级标题"; exit 1; }
+          grep -qE '^## .+' "$D/draft.md" || { echo "::error::章节未降为二级标题"; exit 1; }
+          echo "✓ 标题层级正确"
+
+      - name: Existing draft must not be overwritten
+        shell: bash
+        run: |
+          S=skills/word-master/scripts
+          D=$(mktemp -d)
+          python "$S/project.py" init "$D" --title "保护测试" >/dev/null
+          echo "# 我自己的稿子" > "$D/draft.md"
+          echo "内容不该被覆盖" >> "$D/draft.md"
+          python "$S/project.py" import-sources "$D" "$PROJ/output.docx" > /tmp/imp2.json
+          grep -q "我自己的稿子" "$D/draft.md" || { echo "::error::已有 draft 被覆盖了"; exit 1; }
+          python - <<'EOF'
+          import json
+          d = json.load(open("/tmp/imp2.json", encoding="utf-8"))
+          assert d["draftCreated"] is False, "不该再创建 draft"
+          print("✓ 已有 draft 未被覆盖")
+          EOF
+
       - name: Export with PDF
         shell: bash
         run: |
