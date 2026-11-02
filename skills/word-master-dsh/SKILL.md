@@ -30,6 +30,18 @@ ${PAYLOAD_DIR}
 
 ## 八步流水线
 
+### ⓪ 建项目与收素材（`word_project`）
+
+新项目先 `action=init`，它建出 `sources/`、`converted/` 与 `project.json`。
+重复 init 是幂等的，不会清空已有稿子。
+
+素材用 `action=import-sources`（本地文件默认复制，不 move），
+Markdown/文本直接进 `converted/`，文档类进 `sources/` 待转。
+
+**跨会话续做，先跑 `action=validate`** —— 它会告诉你当前阶段、下一步、
+以及有没有隐性漏步（质检 P0 未清、draft 比质检报告新、素材没转）。
+`action=info` 是一行看进度。
+
 ### ① 体检（`word_env`）
 
 开工先调。缺 python-docx 就把补齐命令（工具已经给好了）交给用户；缺 LibreOffice

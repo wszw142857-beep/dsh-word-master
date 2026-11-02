@@ -67,7 +67,8 @@ metadata:
 ## 流水线
 
 ```
-⓪ word_convert    素材转 Markdown            —（用户给的不是 md 时）
+⓪ word_project    建项目 + 收素材               —（新项目或素材陆续进来时）
+⓪b word_convert    素材转 Markdown            —（用户给的不是 md 时）
 ① word_env        体检                    🚧 解释器与依赖就绪
 ② word_pref       偏好核对                 🚧 用户新要求已落盘
    word_template  套模板（可选）             —（用户有规范文档时）
@@ -79,6 +80,30 @@ metadata:
 ⑧ word_render     渲染闸门 + 视觉判据         —（必须逐页看图）
 ⑨ word_export     导出定稿                   —
 ```
+
+### ⓪ 建项目与收素材（`word_project`）
+
+**新项目先 init**，它建出 `sources/` 与 `converted/` 两个目录并写 `project.json`。
+重复 init 是**幂等**的：只补缺的目录，不动已有的 spec/draft。
+
+素材进来时用 `import-sources`：本地文件默认**复制**（不 move，用户的原始文件不该
+因为我们收素材就消失），Markdown/文本直接进 `converted/`，文档类进 `sources/` 并
+标记待转换。
+
+### 随时可查：`word_project action=validate`
+
+这是本流水线的**自检入口**，不是可有可无的附赠功能。它会：
+
+1. **推断当前阶段**：`empty` / `draft` / `frozen` / `built` / `reviewed` / `delivered`
+2. **给出下一步**：每个阶段都有明确的 `nextStep`
+3. **抓隐性漏步**——这几类是最容易出事的：
+   - `gate-p0`：质检还有 P0 未清就想交付
+   - `stale-gate`：`draft.md` 比质检报告新（改了稿没重跑门禁，报告已过期）
+   - `unconverted-sources`：素材收了但没转
+   - `spec-not-frozen`：已有产物但规格未冻结（产物不对应任何已确认规格）
+   - `no-visual-report` / `no-render`：声称交付但没做视觉验收
+
+**跨会话续做时先跑 validate**，比重新勘察目录快得多。`action=info` 是一行看进度。
 
 ### ②b 套模板（`word_template`，可选）
 
@@ -190,6 +215,7 @@ LibreOffice 缺失时 `word_render` 会跳过并说明 —— 此时只能说"�
 
 | 工具 | 什么时候用 |
 |---|---|
+| `word_project` | 建项目、收素材、查进度与漏步（**跨会话先跑 validate**） |
 | `word_convert` | 素材不是 Markdown 时（PDF/Word/Excel/PPT/网页） |
 | `word_env` | 开工第一步 |
 | `word_pref` | 读/写偏好；用户提新要求时 |
@@ -210,13 +236,17 @@ LibreOffice 缺失时 `word_render` 会跳过并说明 —— 此时只能说"�
 
 ```
 <project>/
+├── project.json        项目清单（阶段/素材登记）
+├── sources/            原始素材
+├── converted/          素材转换出的 Markdown
 ├── spec.json           规格（冻结后只读）
 ├── draft.md            正文草稿（模型写，审阅界面也可改）
 ├── output.docx         构建产物
 ├── final.docx          交付定稿
 ├── gate-report.json    质检报告
+├── visual-report.json  视觉判据报告
 ├── review-notes.json   ← 用户在审阅界面提的意见（AI 必读）
-├── review-result.json  ← 交接记录（status/p0/p1/opinions）
+├── review-result.json  ← 交接记录（status/p0/p1/decisions）
 └── render/
     ├── output.pdf
     └── pages/*.png

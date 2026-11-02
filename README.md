@@ -146,15 +146,35 @@ dsh plugin --profile desktop add D:/dsh/plugins/dsh-word-master
 
 | 工具 | 作用 |
 |---|---|
+| `word_project` | 项目生命周期：init / import-sources / validate / info |
+| `word_convert` | PDF / Word / Excel / PPT / 网页 → Markdown |
 | `word_env` | 环境体检 |
 | `word_pref` | 读写偏好；生成可写入记忆空间的文本 |
+| `word_template` | 从现成 docx 提取版式并套用 |
 | `word_spec` | init / read / freeze 规格 |
 | `word_build` | Markdown → DOCX |
 | `word_gate` | 质检门（退出码 0/2/3/4） |
+| `word_review` | HTML 审阅界面（起/停/查/读决定） |
 | `word_render` | DOCX → PDF → 逐页 PNG |
+| `word_visual` | 从 PDF 量排版判据 |
 | `word_export` | 定稿导出（可带 PDF） |
 | `word_read` | 读现有 DOCX 结构，改稿前用 |
 | `word_pref_section` | 查看当前生效的偏好原文 |
+
+### `word_project validate`：随时知道做到哪一步
+
+它推断当前阶段（`empty`→`draft`→`frozen`→`built`→`reviewed`→`delivered`），
+给出下一步，并抓这几类**隐性漏步**：
+
+| 检查 | 抓什么 |
+|---|---|
+| `gate-p0` | 质检还有 P0 未清就想交付 |
+| `stale-gate` | `draft.md` 比质检报告新（改了稿没重跑门禁） |
+| `unconverted-sources` | 素材收了但没转 |
+| `spec-not-frozen` | 已有产物但规格未冻结 |
+| `no-visual-report` / `no-render` | 声称交付但没做视觉验收 |
+
+跨会话续做时先跑它，比重新勘察目录快得多。
 
 ## 偏好记忆怎么设计的
 

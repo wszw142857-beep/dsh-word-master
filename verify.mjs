@@ -167,6 +167,7 @@ const SCRIPTS = [
 	'convert.py',
 	'template.py',
 	'visual_check.py',
+	'project.py',
 	'wm_common.py',
 	'wm_checks.py',
 	'draft_model.py',
